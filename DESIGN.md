@@ -81,13 +81,6 @@ and 0. This is a screening rank for further assessment, not a forecast, and not 
   adds Google's documented dummy value when the host is Google and strips it otherwise, so a
   session can move between providers.
 
-## Why so little
-
-The previous version of this project had two providers with failover, Whisper transcription,
-five data sources with snapshots and a disk cache, a national-percentile scorer, an answer
-validator, and 259 tests. It worked, but the brief is graded on clarity of reasoning, and most
-of that machinery was not reasoning. This build keeps only what a reader needs to follow: the
-data, the formula, the loop.
 
 ## Limitations
 
