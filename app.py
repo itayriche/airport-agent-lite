@@ -16,7 +16,12 @@ from prompts import SYSTEM_PROMPT, TOOL_SCHEMAS
 
 load_dotenv()
 
+BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.groq.com/openai/v1")
 MODEL = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
+GOOGLE = "googleapis.com" in BASE_URL
+# Gemini's OpenAI-compatible endpoint rejects a replayed tool call without a thought signature;
+# Google documents this dummy value. Other hosts do not know the field, so it is stripped for them.
+DUMMY_SIGNATURE = {"google": {"thought_signature": "skip_thought_signature_validator"}}
 HISTORY_FILE = "history.json"
 CONTEXT_MESSAGES = 30  # most recent messages sent to the model, cut at a turn boundary
 MAX_ROUNDS = 5  # tool-call rounds per user message
@@ -28,7 +33,7 @@ TOOLS = {
         args.get("kpis", {}), args.get("objective", "expansion"), args.get("weights")),
 }
 
-client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=os.environ["GROQ_API_KEY"],
+client = OpenAI(base_url=BASE_URL, api_key=os.environ["LLM_API_KEY"],
                 max_retries=0)  # no retries: a 429/5xx is shown in the chat as-is
 app = FastAPI(title="airport-agent-lite")
 _lock = threading.Lock()  # one process, but FastAPI runs sync handlers in a thread pool
@@ -74,13 +79,40 @@ def run_tool(name: str, arguments: str) -> dict:
         return {"error": f"{name} failed: {type(e).__name__}: {e}"}
 
 
+def tool_call_dict(tc) -> dict:
+    d = {"id": tc.id, "type": "function",
+         "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+    extra = (tc.model_extra or {}).get("extra_content")  # Gemini's thought signature, if any
+    if GOOGLE:
+        d["extra_content"] = extra or DUMMY_SIGNATURE
+    return d
+
+
+def for_provider(messages: list) -> list:
+    """History may have been written under another provider: add/strip the Google signature."""
+    out = []
+    for m in messages:
+        if m.get("tool_calls"):
+            calls = []
+            for c in m["tool_calls"]:
+                c = dict(c)
+                if GOOGLE:
+                    c.setdefault("extra_content", DUMMY_SIGNATURE)
+                else:
+                    c.pop("extra_content", None)
+                calls.append(c)
+            m = {**m, "tool_calls": calls}
+        out.append(m)
+    return out
+
+
 def run_turn(messages: list) -> tuple[str, list]:
     """Append the model's messages (incl. tool calls/results) to `messages`; return (reply, trace)."""
     trace = []
     for _ in range(MAX_ROUNDS):
         resp = client.chat.completions.create(
             model=MODEL,
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}, *recent(messages)],
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}, *for_provider(recent(messages))],
             tools=TOOL_SCHEMAS,
             tool_choice="auto",
         )
@@ -92,11 +124,7 @@ def run_turn(messages: list) -> tuple[str, list]:
         messages.append({
             "role": "assistant",
             "content": msg.content,
-            "tool_calls": [
-                {"id": tc.id, "type": "function",
-                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                for tc in msg.tool_calls
-            ],
+            "tool_calls": [tool_call_dict(tc) for tc in msg.tool_calls],
         })
         for tc in msg.tool_calls:
             result = run_tool(tc.function.name, tc.function.arguments)
