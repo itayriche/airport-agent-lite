@@ -39,6 +39,10 @@ served from disk, no restart needed.
 - `delay` is live FAA severity, not a historical rate. Closure NOTAMs are severity 1, not 2.
 - Plain-text replies; the page renders `textContent`, not markdown. gpt-oss-120b sometimes
   ignores this; Gemini obeys.
+- The system prompt fixes a six-section reply order (Answer, Airports considered, Ranking,
+  Reasoning, Assumptions and limits, Sources) because the brief asks for clear reasoning and
+  explicit assumptions and scoping. Keep the labels if you edit the prompt; DESIGN.md and README
+  describe them.
 - Tests cover pure functions only. Routes, APIs, and the LLM are checked by hand.
 
 ## Gotchas

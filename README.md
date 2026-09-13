@@ -36,8 +36,9 @@ bubble as-is, and the failed turn is not saved. Switch provider by editing `.env
 - What is the long-haul share at ANC?
 - Is there unmet demand at SFO, and why?
 
-Every reply has a collapsed "tools" block showing each tool call, its arguments, and the raw
-result, so the numbers in the answer can be checked against the data.
+Every reply uses the same order: Answer, Airports considered, Ranking, Reasoning, Assumptions and
+limits, Sources. Under it, a collapsed "tools" block shows each tool call, its arguments, and the
+raw result, so the numbers in the answer can be checked against the data.
 
 ## Layout
 

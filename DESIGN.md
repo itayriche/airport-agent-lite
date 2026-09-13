@@ -68,6 +68,35 @@ Scores are relative to the candidate set, not to all US airports. The prompt the
 model to add three to five peers when asked about one airport, and two airports always score 100
 and 0. This is a screening rank for further assessment, not a forecast, and not a dollar model.
 
+## Answer format
+
+The system prompt fixes the order of every reply so an analyst can find the same thing in the
+same place each time:
+
+1. **Answer**: the direct answer in one or two sentences.
+2. **Airports considered**: the codes used and why they were chosen (the scoping decision).
+3. **Ranking**: one line per airport with score, the KPIs that drove it and their points from
+   `contributions`, and what held it back. Omitted for plain factual questions.
+4. **Reasoning**: objective, weights used, what the score means (relative to this set), why the
+   top airport beat the next one.
+5. **Assumptions and limits**: screening rank not a profit forecast, live delay snapshot, cargo in
+   T-100, no gate/runway/slot data, scope chosen by the model, anything missing.
+6. **Sources**: data vintage and the FAA timestamp.
+
+Follow-ups keep the format: "why" answers from the stored contributions without new tool calls,
+a re-scope re-runs the workflow with new codes, a what-if re-scores and shows before and after.
+
+## Key tradeoffs
+
+| Choice | Gained | Given up |
+|--------|--------|----------|
+| One LLM provider, no fallback or retry | Nothing to configure or debug; errors are visible | A quota outage stops the demo until `.env` is swapped |
+| Two live keyless feeds, no cache | Always current; no stale snapshot to explain | Every question waits on BTS and FAA; a feed outage is an error, not a degraded answer |
+| Model picks the IATA codes | No region table to maintain; works for any geography the model knows | A wrong or missing airport is only caught because the reply lists the codes |
+| Min-max within the candidate set | Simple, explainable arithmetic; what-ifs are one re-call | Scores are not comparable across questions; two airports give 100 and 0 |
+| Live FAA delay severity | A real "right now" congestion signal with reasons | Not a historical rate; the same question can score differently an hour later |
+| Fixed answer template in the prompt | Same order every time; reasoning and limits always present | Longer replies and more tokens per turn on the free tier |
+
 ## Agent loop and memory
 
 - One provider at a time via `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`; native tool calling
