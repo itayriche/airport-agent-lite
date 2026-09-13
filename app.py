@@ -1,4 +1,4 @@
-"""Minimal airport screening agent: FastAPI + Groq + two live data tools + a JSON history file."""
+"""Minimal airport screening agent: FastAPI + Groq + two live data tools + a scoring tool + JSON history."""
 
 import json
 import os
@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from openai import APIError, APIStatusError, OpenAI
 from pydantic import BaseModel
 
+import calc
 import tools
 from prompts import SYSTEM_PROMPT, TOOL_SCHEMAS
 
@@ -23,9 +24,12 @@ MAX_ROUNDS = 5  # tool-call rounds per user message
 TOOLS = {
     "get_airport_stats": lambda args: tools.fetch_t100(args.get("codes", [])),
     "get_live_status": lambda args: tools.fetch_nas(args.get("codes", [])),
+    "score_airports": lambda args: calc.score_airports(
+        args.get("kpis", {}), args.get("objective", "expansion"), args.get("weights")),
 }
 
-client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=os.environ["GROQ_API_KEY"])
+client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=os.environ["GROQ_API_KEY"],
+                max_retries=0)  # no retries: a 429/5xx is shown in the chat as-is
 app = FastAPI(title="airport-agent-lite")
 _lock = threading.Lock()  # one process, but FastAPI runs sync handlers in a thread pool
 
@@ -64,7 +68,10 @@ def run_tool(name: str, arguments: str) -> dict:
     fn = TOOLS.get(name)
     if fn is None:
         return {"error": f"unknown tool {name}"}
-    return fn(args)
+    try:
+        return fn(args)
+    except Exception as e:  # a tool bug becomes a tool error the model can report, not a 500
+        return {"error": f"{name} failed: {type(e).__name__}: {e}"}
 
 
 def run_turn(messages: list) -> tuple[str, list]:

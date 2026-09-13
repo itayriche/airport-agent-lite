@@ -43,7 +43,7 @@ def t100_kpis(rows: list[dict]) -> dict:
     out = {}
     for code, rs in by_code.items():
         def total(field, sel):
-            return sum(_num(r[field]) for r in rs if sel(r["reporting_month"][:7]))
+            return sum(_num(r.get(field)) for r in rs if sel(r["reporting_month"][:7]))
 
         pax_base = total("total_passengers", lambda m: m.startswith(str(BASE_YEAR)))
         pax_last = total("total_passengers", lambda m: m.startswith(str(last_full_year)))
@@ -55,7 +55,7 @@ def t100_kpis(rows: list[dict]) -> dict:
         pax_t12 = total("total_passengers", lambda m: m in t12)
         dep_t12 = total("total_departures", lambda m: m in t12)
         intl_t12 = total("outbound_international", lambda m: m in t12)
-        dist = [_num(r["total_distance_flight_sm"]) for r in rs if r["reporting_month"][:7] in t12]
+        dist = [_num(r.get("total_distance_flight_sm")) for r in rs if r["reporting_month"][:7] in t12 and r.get("total_distance_flight_sm")]
         n_t12 = sum(1 for r in rs if r["reporting_month"][:7] in t12)
 
         out[code] = {
@@ -115,7 +115,9 @@ def fetch_t100(codes: list[str]) -> dict:
 
 # ---- FAA NAS status ------------------------------------------------------------------------
 
-SEVERITY = {"Ground Stop": 2}  # any other active program (delay program, closure NOTAM) = 1
+def severity(kind: str) -> int:
+    """2 = ground stop, 1 = any other active program (delay program, closure NOTAM)."""
+    return 2 if "ground stop" in kind.lower() else 1
 
 
 def parse_nas(text: str) -> tuple[str, list[dict]]:
@@ -152,7 +154,7 @@ def fetch_nas(codes: list[str]) -> dict:
     airports = {}
     for c in codes:
         mine = [e for e in events if e["code"] == c]
-        sev = max((SEVERITY.get(e["type"], 1) for e in mine), default=0)
+        sev = max((severity(e["type"]) for e in mine), default=0)
         airports[c] = {"delay": sev, "events": mine}
     return {
         "source": "FAA NAS airport status, live now (absence from the feed is not proof of no delays)",
