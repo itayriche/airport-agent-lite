@@ -19,8 +19,10 @@
   body { padding-left: 240px; box-sizing: border-box; }
   form { left: 240px; }
   @media (max-width: 720px) { #side { display: none; } body { padding-left: 0; } form { left: 0; } }
-  #starters { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0; }
-  #starters button { background: #fff; color: #2a5bd7; border: 1px solid #2a5bd7; padding: 8px 12px; text-align: start; }
+  #starters { min-height: calc(100vh - 180px); display: flex; flex-direction: column; justify-content: center;
+              align-items: center; gap: 10px; }
+  #starters p { color: #777; margin: 0 0 8px; }
+  #starters button { background: #fff; color: #2a5bd7; border: 1px solid #2a5bd7; padding: 10px 16px; width: min(100%, 520px); text-align: center; }
   .msg { padding: 10px 14px; border-radius: 10px; margin: 8px 0; white-space: pre-wrap; }
   .user { background: #dbe8ff; margin-left: 15%; }
   .bot { background: #fff; border: 1px solid #e2e4e8; margin-right: 15%; }
@@ -78,6 +80,9 @@ async function restore() {
 function showStarters() {
   const box = document.createElement('div');
   box.id = 'starters';
+  const p = document.createElement('p');
+  p.textContent = 'Try one of these, or type your own question below';
+  box.appendChild(p);
   for (const q of STARTERS) {
     const b = document.createElement('button');
     b.type = 'button';
