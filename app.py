@@ -147,6 +147,18 @@ def index():
     return FileResponse("static/index.html")
 
 
+@app.get("/sessions")
+def sessions():
+    """All sessions in history.json, oldest first, titled by their first user message."""
+    with _lock:
+        history = load_history()
+    out = []
+    for sid, msgs in history.items():
+        first = next((m["content"] for m in msgs if m["role"] == "user"), "")
+        out.append({"id": sid, "title": first[:60], "turns": sum(m["role"] == "user" for m in msgs)})
+    return {"sessions": out}
+
+
 @app.get("/history/{session_id}")
 def history(session_id: str):
     with _lock:

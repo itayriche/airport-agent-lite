@@ -6,7 +6,12 @@
 <title>Airport agent</title>
 <style>
   body { margin: 0; font: 15px/1.45 system-ui, sans-serif; background: #f6f7f9; color: #1c1e21; }
-  #log { max-width: 820px; margin: 0 auto; padding: 16px 16px 120px; }
+  #top { position: fixed; top: 0; left: 0; right: 0; background: #fff; border-bottom: 1px solid #e2e4e8; padding: 8px 16px; }
+  #top > div { max-width: 820px; margin: 0 auto; display: flex; gap: 8px; align-items: center; }
+  #top select { flex: 1; padding: 6px; border: 1px solid #c8ccd2; border-radius: 8px; font: inherit; background: #fff; }
+  #log { max-width: 820px; margin: 0 auto; padding: 64px 16px 120px; }
+  #starters { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0; }
+  #starters button { background: #fff; color: #2a5bd7; border: 1px solid #2a5bd7; padding: 8px 12px; text-align: start; }
   .msg { padding: 10px 14px; border-radius: 10px; margin: 8px 0; white-space: pre-wrap; }
   .user { background: #dbe8ff; margin-left: 15%; }
   .bot { background: #fff; border: 1px solid #e2e4e8; margin-right: 15%; }
@@ -25,6 +30,10 @@
 </style>
 </head>
 <body>
+<div id="top"><div>
+  <label for="sessions">Session</label>
+  <select id="sessions"></select>
+</div></div>
 <div id="log"></div>
 <form id="f"><div>
   <textarea id="t" placeholder="Ask about US airport capacity..." autofocus></textarea>
@@ -36,18 +45,66 @@
 const log = document.getElementById('log');
 const t = document.getElementById('t');
 const send = document.getElementById('send');
+const sessionsEl = document.getElementById('sessions');
+const STARTERS = [
+  'Which New England airports are the best candidates for terminal expansion?',
+  'Is LAX or SNA more congested?',
+  'What is the long-haul share at ANC?',
+  'Is there unmet demand at SFO, and why?',
+];
 let sessionId = localStorage.getItem('sessionId');
 if (!sessionId) { sessionId = crypto.randomUUID(); localStorage.setItem('sessionId', sessionId); }
 
 async function restore() {
+  log.innerHTML = '';
   const r = await fetch('/history/' + sessionId);
   const data = await r.json();
   data.messages.forEach((m, i) => {
     if (m.role === 'user') add('user', m.content);
     else if (m.role === 'assistant' && !m.tool_calls) addTools(add('bot', m.content || ''), traceFrom(data.messages, i));
   });
+  if (!data.messages.length) showStarters();
 }
+
+function showStarters() {
+  const box = document.createElement('div');
+  box.id = 'starters';
+  for (const q of STARTERS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = q;
+    b.addEventListener('click', () => { t.value = q; send.click(); });
+    box.appendChild(b);
+  }
+  log.appendChild(box);
+}
+
+async function loadSessions() {
+  const data = (await (await fetch('/sessions')).json()).sessions;
+  sessionsEl.innerHTML = '';
+  let found = false;
+  for (const s of data.reverse()) {
+    const o = document.createElement('option');
+    o.value = s.id;
+    o.textContent = (s.title || '(empty)') + ' · ' + s.turns + (s.turns === 1 ? ' turn' : ' turns');
+    if (s.id === sessionId) { o.selected = true; found = true; }
+    sessionsEl.appendChild(o);
+  }
+  if (!found) {
+    const o = document.createElement('option');
+    o.value = sessionId; o.textContent = '(new chat)'; o.selected = true;
+    sessionsEl.prepend(o);
+  }
+}
+
+sessionsEl.addEventListener('change', () => {
+  sessionId = sessionsEl.value;
+  localStorage.setItem('sessionId', sessionId);
+  restore();
+});
+
 restore();
+loadSessions();
 
 // Voice input: the browser's own recognizer (Chrome/Edge). Transcript lands in the box; you press Send.
 const mic = document.getElementById('mic');
@@ -75,6 +132,8 @@ document.getElementById('new').addEventListener('click', () => {
   sessionId = crypto.randomUUID();
   localStorage.setItem('sessionId', sessionId);
   log.innerHTML = '';
+  showStarters();
+  loadSessions();
   t.focus();
 });
 
@@ -120,6 +179,8 @@ document.getElementById('f').addEventListener('submit', async (e) => {
   const message = t.value.trim();
   if (!message) return;
   t.value = '';
+  const starters = document.getElementById('starters');
+  if (starters) starters.remove();
   add('user', message);
   send.disabled = true;
   const pending = add('bot', '…');
@@ -135,6 +196,7 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     pending.classList.add('error');
   }
   send.disabled = false;
+  loadSessions();
   t.focus();
 });
 t.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send.click(); } });
