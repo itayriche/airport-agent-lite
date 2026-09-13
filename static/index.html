@@ -18,6 +18,7 @@
   button { padding: 0 16px; border: 0; border-radius: 8px; background: #2a5bd7; color: #fff; font: inherit; cursor: pointer; }
   button:disabled { opacity: .5; cursor: default; }
   button.secondary { background: #e9ebef; color: #1c1e21; }
+  #mic.listening { background: #ffd6d6; }
   details { margin: 6px 0 0; font-size: 13px; color: #555; }
   details summary { cursor: pointer; }
   details pre { background: #f2f3f5; padding: 8px; border-radius: 6px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
@@ -27,6 +28,7 @@
 <div id="log"></div>
 <form id="f"><div>
   <textarea id="t" placeholder="Ask about US airport capacity..." autofocus></textarea>
+  <button id="mic" type="button" class="secondary" title="Speak your question (Chrome)">&#127908;</button>
   <button id="send" type="submit">Send</button>
   <button id="new" type="button" class="secondary">New chat</button>
 </div></form>
@@ -46,6 +48,28 @@ async function restore() {
   });
 }
 restore();
+
+// Voice input: the browser's own recognizer (Chrome/Edge). Transcript lands in the box; you press Send.
+const mic = document.getElementById('mic');
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!Recognition) {
+  mic.disabled = true;
+  mic.title = 'Speech recognition is not available in this browser; use Chrome.';
+} else {
+  const rec = new Recognition();
+  rec.lang = 'en-US';
+  rec.interimResults = false;
+  rec.continuous = false;
+  let listening = false;
+  rec.onstart = () => { listening = true; mic.classList.add('listening'); };
+  rec.onend = () => { listening = false; mic.classList.remove('listening'); t.focus(); };
+  rec.onresult = (e) => {
+    const text = e.results[0][0].transcript.trim();
+    t.value = (t.value.trim() ? t.value.trim() + ' ' : '') + text;
+  };
+  rec.onerror = (e) => { mic.title = 'Mic error: ' + e.error; };
+  mic.addEventListener('click', () => { if (listening) rec.stop(); else rec.start(); });
+}
 
 document.getElementById('new').addEventListener('click', () => {
   sessionId = crypto.randomUUID();
