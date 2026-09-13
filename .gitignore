@@ -1,0 +1,7 @@
+.venv/
+.env
+history.json
+__pycache__/
+.pytest_cache/
+server.out.log
+server.err.log

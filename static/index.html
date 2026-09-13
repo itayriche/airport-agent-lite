@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Airport agent</title>
+<style>
+  body { margin: 0; font: 15px/1.45 system-ui, sans-serif; background: #f6f7f9; color: #1c1e21; }
+  #log { max-width: 820px; margin: 0 auto; padding: 16px 16px 120px; }
+  .msg { padding: 10px 14px; border-radius: 10px; margin: 8px 0; white-space: pre-wrap; }
+  .user { background: #dbe8ff; margin-left: 15%; }
+  .bot { background: #fff; border: 1px solid #e2e4e8; margin-right: 15%; }
+  .error { background: #ffe3e3; border-color: #f5b5b5; }
+  form { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #e2e4e8;
+         padding: 12px 16px; display: flex; gap: 8px; }
+  form > div { max-width: 820px; margin: 0 auto; display: flex; gap: 8px; width: 100%; }
+  textarea { flex: 1; resize: none; height: 44px; padding: 10px; border: 1px solid #c8ccd2; border-radius: 8px; font: inherit; }
+  button { padding: 0 16px; border: 0; border-radius: 8px; background: #2a5bd7; color: #fff; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+</style>
+</head>
+<body>
+<div id="log"></div>
+<form id="f"><div>
+  <textarea id="t" placeholder="Ask about US airport capacity..." autofocus></textarea>
+  <button id="send" type="submit">Send</button>
+</div></form>
+<script>
+const log = document.getElementById('log');
+const t = document.getElementById('t');
+const send = document.getElementById('send');
+const sessionId = crypto.randomUUID();
+
+function add(role, text, cls) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + role + (cls ? ' ' + cls : '');
+  d.textContent = text;
+  log.appendChild(d);
+  d.scrollIntoView({ block: 'end' });
+  return d;
+}
+
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = t.value.trim();
+  if (!message) return;
+  t.value = '';
+  add('user', message);
+  send.disabled = true;
+  const pending = add('bot', '…');
+  try {
+    const r = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, message }) });
+    const data = await r.json();
+    pending.textContent = data.reply;
+    if (data.error) pending.classList.add('error');
+  } catch (err) {
+    pending.textContent = 'Request failed: ' + err;
+    pending.classList.add('error');
+  }
+  send.disabled = false;
+  t.focus();
+});
+t.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send.click(); } });
+</script>
+</body>
+</html>
