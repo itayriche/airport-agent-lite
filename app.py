@@ -1,4 +1,5 @@
-"""Minimal airport screening agent: FastAPI + Groq + two live data tools + a scoring tool + JSON history."""
+"""Minimal airport screening agent: FastAPI + one OpenAI-compatible LLM + two live data tools
+(BTS T-100 traffic statistics, FAA NAS live delay status) + a scoring tool + JSON history."""
 
 import json
 import os
@@ -26,6 +27,7 @@ HISTORY_FILE = "history.json"
 CONTEXT_MESSAGES = 30  # most recent messages sent to the model, cut at a turn boundary
 MAX_ROUNDS = 5  # tool-call rounds per user message
 
+# Tool name (as the model sees it in TOOL_SCHEMAS) -> the Python function that runs it.
 TOOLS = {
     "get_airport_stats": lambda args: tools.fetch_t100(args.get("codes", [])),
     "get_live_status": lambda args: tools.fetch_nas(args.get("codes", [])),
@@ -42,6 +44,7 @@ _lock = threading.Lock()  # one process, but FastAPI runs sync handlers in a thr
 # ---- history.json: {session_id: [OpenAI-format messages]} ---------------------------------
 
 def load_history() -> dict:
+    """Read history.json; an absent file means no sessions yet."""
     if not os.path.exists(HISTORY_FILE):
         return {}
     with open(HISTORY_FILE, encoding="utf-8") as f:
@@ -49,6 +52,7 @@ def load_history() -> dict:
 
 
 def save_history(history: dict) -> None:
+    """Write the whole history atomically (temp file, then rename) so a crash never leaves half a file."""
     tmp = HISTORY_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=1)
@@ -66,6 +70,7 @@ def recent(messages: list, n: int = CONTEXT_MESSAGES) -> list:
 # ---- agent loop ----------------------------------------------------------------------------
 
 def run_tool(name: str, arguments: str) -> dict:
+    """Run one tool call requested by the model; any failure becomes an {"error": ...} result."""
     try:
         args = json.loads(arguments or "{}")
     except json.JSONDecodeError as e:
@@ -80,6 +85,7 @@ def run_tool(name: str, arguments: str) -> dict:
 
 
 def tool_call_dict(tc) -> dict:
+    """Convert the SDK's tool-call object into the plain dict stored in history.json."""
     d = {"id": tc.id, "type": "function",
          "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
     extra = (tc.model_extra or {}).get("extra_content")  # Gemini's thought signature, if any
@@ -107,7 +113,8 @@ def for_provider(messages: list) -> list:
 
 
 def run_turn(messages: list) -> tuple[str, list]:
-    """Append the model's messages (incl. tool calls/results) to `messages`; return (reply, trace)."""
+    """The agent loop: call the model, run any tools it asks for, repeat until it answers in text
+    or MAX_ROUNDS is hit. Appends everything to `messages`; returns (reply, trace of tool calls)."""
     trace = []
     for _ in range(MAX_ROUNDS):
         resp = client.chat.completions.create(
@@ -138,12 +145,14 @@ def run_turn(messages: list) -> tuple[str, list]:
 # ---- routes ------------------------------------------------------------------------------
 
 class ChatIn(BaseModel):
+    """Body of POST /chat."""
     session_id: str
     message: str
 
 
 @app.get("/")
 def index():
+    """Serve the single-page UI straight from disk (no build step, no restart to edit it)."""
     return FileResponse("static/index.html")
 
 
@@ -161,12 +170,14 @@ def sessions():
 
 @app.get("/history/{session_id}")
 def history(session_id: str):
+    """Full message list of one session, used by the page to restore a chat on reload."""
     with _lock:
         return {"messages": load_history().get(session_id, [])}
 
 
 @app.post("/chat")
 def chat(body: ChatIn):
+    """One user turn: append the message, run the agent loop, save; on an LLM error drop the turn."""
     with _lock:
         history = load_history()
         messages = history.setdefault(body.session_id, [])

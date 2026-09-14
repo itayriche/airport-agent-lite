@@ -21,8 +21,10 @@ browser ──POST /chat──> app.py ──> LLM (OpenAI-compatible, tool call
 
 Two keyless public feeds, called fresh on every question. No cache, no bundled snapshots.
 
-**BTS T-100 by origin airport** (`data.bts.gov/resource/r495-tyji.json`). One row per airport
-per month, 2019 to the latest published month (2026-04 at the time of writing), all commercial
+**BTS T-100 by origin airport** (`data.bts.gov/resource/r495-tyji.json`). T-100 is the form on
+which every US airline reports its monthly flights, seats and passengers to the Bureau of
+Transportation Statistics; this dataset sums it per origin airport. One row per airport per
+month, 2019 to the latest published month (2026-04 at the time of writing), all commercial
 service including cargo carriers. Fields used: departures, passengers, seats, international
 departures, average flight distance. Aggregated per airport into:
 
@@ -34,12 +36,17 @@ departures, average flight distance. Aggregated per airport into:
 | `scale` | passengers in the trailing 12 months (T-100 departing passengers, not FAA enplanements) |
 | `intl_share` | international departures / all departures, trailing 12 months |
 | `avg_stage_mi` | mean monthly average flight distance, statute miles (context for long-haul questions) |
+| `intl_pax_share` | international passengers / all passengers, trailing 12 months. Not scored. A large gap below `intl_share` means the international flights are freighters (ANC: about 15% of departures, under 1% of passengers) |
+| `freight_lbs` | freight + mail pounds departed, trailing 12 months. Not scored; lets the model recognise a cargo hub |
 
-**FAA NAS airport status** (`nasstatus.faa.gov/api/airport-status-information`). What is active
-right now: ground stops, ground delay programs, general delay notices, closure NOTAMs, with
-reasons. Mapped to `delay`: 0 nothing active, 1 any active program or notice, 2 ground stop.
-Closure NOTAMs are usually about general aviation, so they are not treated as severity 2; the
-reason text is passed to the model.
+**FAA NAS airport status** (`nasstatus.faa.gov/api/airport-status-information`). The Federal
+Aviation Administration's National Airspace System feed of what is active right now: ground
+stops (flights bound for the airport are held at their origin), ground delay programs (flights
+are metered with assigned delays), general delay notices, and closure NOTAMs (Notices to Air
+Missions about a facility condition), with reasons. Mapped to `delay`: 0 nothing active, 1 any
+active program or notice, 2 ground stop. Closure NOTAMs are usually about general aviation
+(private, non-airline flying), so they are not treated as severity 2; the reason text is passed
+to the model.
 
 Geography is the model's job. The tools take explicit IATA codes; the prompt tells the model to
 name the codes it chose so a wrong choice is visible.
@@ -79,23 +86,46 @@ same place each time:
    `contributions`, and what held it back. Omitted for plain factual questions.
 4. **Reasoning**: objective, weights used, what the score means (relative to this set), why the
    top airport beat the next one.
-5. **Assumptions and limits**: screening rank not a profit forecast, live delay snapshot, cargo in
+5. **Analyst view**: the model's own judgment, marked as opinion and kept apart from the score:
+   what the ranking misses (a cargo hub whose international share is freighters, growth from a
+   tiny base, an airport held back only by the delay snapshot), what may not hold, what to check
+   next. It may disagree with the ranking but must say why, using only numbers from the tools.
+6. **Assumptions and limits**: screening rank not a profit forecast, live delay snapshot, cargo in
    T-100, no gate/runway/slot data, scope chosen by the model, anything missing.
-6. **Sources**: data vintage and the FAA timestamp.
+7. **Sources**: data vintage and the FAA timestamp.
 
 Follow-ups keep the format: "why" answers from the stored contributions without new tool calls,
 a re-scope re-runs the workflow with new codes, a what-if re-scores and shows before and after.
 
 ## Key tradeoffs
 
-| Choice | Gained | Given up |
-|--------|--------|----------|
-| One LLM provider, no fallback or retry | Nothing to configure or debug; errors are visible | A quota outage stops the demo until `.env` is swapped |
-| Two live keyless feeds, no cache | Always current; no stale snapshot to explain | Every question waits on BTS and FAA; a feed outage is an error, not a degraded answer |
-| Model picks the IATA codes | No region table to maintain; works for any geography the model knows | A wrong or missing airport is only caught because the reply lists the codes |
-| Min-max within the candidate set | Simple, explainable arithmetic; what-ifs are one re-call | Scores are not comparable across questions; two airports give 100 and 0 |
-| Live FAA delay severity | A real "right now" congestion signal with reasons | Not a historical rate; the same question can score differently an hour later |
-| Fixed answer template in the prompt | Same order every time; reasoning and limits always present | Longer replies and more tokens per turn on the free tier |
+The brief says to prioritise clarity and reasoning over completeness. Every choice below picks
+the option with the fewest moving parts that still meets the requirement, so that a reviewer can
+read the whole system in one sitting.
+
+**Stack**
+
+| Decision | Chosen | Alternative | Why, and what it costs |
+|----------|--------|-------------|------------------------|
+| Agent framework | `openai` SDK, native tool calling, a 25-line loop | LangChain / LangGraph | The loop is the whole agent: call model, run tools, repeat. A framework would hide it behind abstractions and add a dependency tree larger than this project. Cost: no built-in tracing, memory classes or graph visualisation; the trace is our own `tools` block. |
+| Chat UI | One `index.html`, vanilla JS, served by FastAPI | Streamlit / Gradio | The page is served from disk with no build step and no reruns, owns the mic (Web Speech API needs the browser), and can render the tool trace and session sidebar exactly as wanted. Cost: hand-written CSS and JS instead of widgets. |
+| Web server | FastAPI + uvicorn, sync handlers | Flask; or Streamlit's own server | Pydantic validation of the request body and a JSON API the page and the tests can call. Cost: one more dependency than Flask; async is unused. |
+| LLM provider | One OpenAI-compatible endpoint chosen by env (Groq gpt-oss-120b; Gemini flash-lite as the spare) | Several providers with fallback; OpenRouter | One client, one code path; switching is an `.env` edit. Cost: a quota outage stops the demo until the block is swapped and the server restarted. Gemini's thought-signature quirk is the one provider-specific line. |
+| Voice | Chrome's built-in speech recognition (Web Speech API) | Whisper via Groq or OpenAI | No audio upload, no key, no extra endpoint. Cost: Chrome and Edge only; no transcription in Firefox or Safari. |
+| History | `history.json`, whole file rewritten atomically | SQLite; a per-session file; a database | Readable and diffable with any editor; one function to load, one to save. Cost: does not scale past a few hundred sessions and is single-process only. |
+| Data handling | Plain Python loops over Socrata rows | pandas | Six KPIs over a few hundred rows per airport do not need a dataframe. Cost: the aggregation is more lines than a `groupby`. |
+| Tests | pytest on the pure functions (scoring, KPI aggregation, XML parsing) | End-to-end tests with a mocked LLM and mocked APIs | The deterministic core is what the brief asks to be checkable; the LLM and live feeds are verified by hand in the browser. Cost: a route or prompt regression is not caught automatically. |
+
+**Data and scoring**
+
+| Decision | Chosen | Alternative | Why, and what it costs |
+|----------|--------|-------------|------------------------|
+| Data sources | Two keyless live feeds: BTS T-100 (airline-reported monthly traffic per airport) and FAA NAS (live delay programs) | FAA ASPM/OPSNET on-time data, OpenSky or aviationstack flight data, airport master files | Both are free, need no key, cover every US commercial airport and answer the four sample questions. Cost: no physical capacity (gates, runways, slots), no historical delay rate, no route-level long-haul data. |
+| Freshness | Live on every question, no cache | Cached responses or bundled snapshots | Nothing to invalidate or explain; the source line shows the vintage. Cost: every question waits on BTS and FAA; a feed outage is an error, not a degraded answer. |
+| Geography | The model picks the IATA codes | A state/region table | No table to maintain; works for any geography the model knows. Cost: a wrong or missing airport is caught only because the reply lists the codes. |
+| Score | Min-max within the candidate set, weighted sum | Scoring against fixed national thresholds; a regression model | Simple, explainable arithmetic shown per airport; what-ifs are one re-call with new weights. Cost: scores are not comparable across questions, and two airports always give 100 and 0. |
+| Delay signal | Live FAA severity 0/1/2 | Historical on-time performance | A real "right now" congestion signal with reasons. Cost: not a rate; the same question can score differently an hour later. |
+| Answer shape | Fixed seven-section template in the prompt, with one section reserved for the model's own judgment | Free-form narration | Same order every time; reasoning, opinion and limits are always present and kept apart from the arithmetic. Cost: longer replies and more tokens per turn on the free tier. |
 
 ## Agent loop and memory
 

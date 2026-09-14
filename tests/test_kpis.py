@@ -98,6 +98,24 @@ def test_severity_mapping():
     assert severity("Airport Closures") == 1
 
 
+def test_cargo_context_fields():
+    # 1,000 pax/month, 50 of them international; 12 months of freight+mail; all 10 intl departures are freighters
+    r = rows("CGO", months(2025, 2025), 1000, 2000)
+    for x in r:
+        x["outbound_international_1"] = "50"
+        x["total_freight_lbs"] = "1000000"
+        x["total_mail_lbs"] = "500"
+    a = t100_kpis(r)["airports"]["CGO"]
+    assert a["intl_pax_share"] == 0.05
+    assert a["freight_lbs"] == 12 * 1000500
+    assert a["intl_share"] == 0.1  # departure-based share still includes the freighters
+
+
+def test_missing_cargo_fields_default_to_zero():
+    a = t100_kpis(rows("AAA", months(2025, 2025), 100, 200))["airports"]["AAA"]
+    assert a["intl_pax_share"] == 0.0 and a["freight_lbs"] == 0
+
+
 def test_domestic_only_rows_lack_intl_field():
     r = rows("AAA", months(2025, 2025), 100, 200)
     for x in r:

@@ -1,4 +1,22 @@
-"""Live data tools: BTS T-100 (Socrata) and FAA NAS status. No cache, no snapshots, plain Python."""
+"""Live data tools: BTS T-100 (Socrata) and FAA NAS status. No cache, no snapshots, plain Python.
+
+Aviation terms used here
+------------------------
+BTS T-100   The US Bureau of Transportation Statistics form T-100: every airline reports, per
+            month and per route, how many flights it operated and how many seats and passengers
+            it carried. We use the "by origin airport" summary (one row per airport per month).
+Socrata     The open-data API that data.bts.gov runs on; queried with SoQL ($select, $where).
+FAA NAS     The Federal Aviation Administration's National Airspace System status feed: which
+            airports have an active delay program right now, and why.
+Ground stop         The FAA holds flights bound for an airport on the ground at their origin.
+                    The most severe live delay signal (severity 2 here).
+Ground delay program (GDP)  Flights bound for an airport are metered with assigned delays,
+                    usually for weather, runway work or volume (severity 1).
+NOTAM       Notice to Air Missions: a formal notice about a facility condition, for example a
+            closure. Many closure NOTAMs concern general-aviation (private, non-airline) use only.
+Load factor Passengers / seats flown. Stage length: the average flight distance in statute miles.
+CAGR        Compound annual growth rate between two years.
+"""
 
 import xml.etree.ElementTree as ET
 from collections import defaultdict
@@ -9,8 +27,9 @@ T100_URL = "https://data.bts.gov/resource/r495-tyji.json"
 NAS_URL = "https://nasstatus.faa.gov/api/airport-status-information"
 T100_FIELDS = (
     "origin_airport_code,reporting_month,total_departures,total_passengers,total_seats,"
-    "outbound_international,total_distance_flight_sm,origin_airport_name"
-)
+    "outbound_international,outbound_international_1,total_freight_lbs,total_mail_lbs,"
+    "total_distance_flight_sm,origin_airport_name"
+)  # outbound_international_1 is the dataset's name for international passengers
 BASE_YEAR = 2019  # pre-COVID anchor for growth
 TIMEOUT = 30
 
@@ -18,6 +37,7 @@ TIMEOUT = 30
 # ---- BTS T-100 -----------------------------------------------------------------------------
 
 def _num(v):
+    """Socrata returns numbers as strings and omits nulls; treat missing as 0 for sums."""
     return float(v) if v not in (None, "") else 0.0
 
 
@@ -55,6 +75,8 @@ def t100_kpis(rows: list[dict]) -> dict:
         pax_t12 = total("total_passengers", lambda m: m in t12)
         dep_t12 = total("total_departures", lambda m: m in t12)
         intl_t12 = total("outbound_international", lambda m: m in t12)
+        intl_pax_t12 = total("outbound_international_1", lambda m: m in t12)
+        freight_t12 = total("total_freight_lbs", lambda m: m in t12) + total("total_mail_lbs", lambda m: m in t12)
         dist = [_num(r.get("total_distance_flight_sm")) for r in rs if r["reporting_month"][:7] in t12 and r.get("total_distance_flight_sm")]
         n_t12 = sum(1 for r in rs if r["reporting_month"][:7] in t12)
 
@@ -65,6 +87,8 @@ def t100_kpis(rows: list[dict]) -> dict:
             "seat_growth": round(seats_t12 / seats_p12 - 1, 4) if seats_p12 else None,
             "scale": int(pax_t12),
             "intl_share": round(intl_t12 / dep_t12, 4) if dep_t12 else None,
+            "intl_pax_share": round(intl_pax_t12 / pax_t12, 4) if pax_t12 else None,
+            "freight_lbs": int(freight_t12),
             "avg_stage_mi": round(sum(dist) / len(dist)) if dist else None,
             "months_in_window": n_t12,
             "pax_base_year": int(pax_base),
@@ -81,6 +105,8 @@ def t100_kpis(rows: list[dict]) -> dict:
             "seat_growth": "seats in the trailing 12 months vs the 12 months before (not a CAGR)",
             "scale": "total passengers (departing, all carriers) in the trailing 12 months; not FAA enplanements",
             "intl_share": "international departures / all departures, trailing 12 months (includes cargo flights)",
+            "intl_pax_share": "international passengers / all passengers, trailing 12 months (cargo-free; a big gap below intl_share means the international flights are mostly freighters)",
+            "freight_lbs": "freight + mail pounds departed, trailing 12 months (context only, not scored)",
             "avg_stage_mi": "mean of monthly average flight distance, statute miles, trailing 12 months",
         },
         "airports": out,
@@ -88,6 +114,8 @@ def t100_kpis(rows: list[dict]) -> dict:
 
 
 def fetch_t100(codes: list[str]) -> dict:
+    """Tool `get_airport_stats`: one live Socrata query for the given IATA codes since BASE_YEAR,
+    aggregated by `t100_kpis`. Network or HTTP failures come back as {"error": ...}."""
     codes = sorted({c.strip().upper() for c in codes if c.strip()})
     if not codes:
         return {"error": "no airport codes given"}
@@ -116,11 +144,14 @@ def fetch_t100(codes: list[str]) -> dict:
 # ---- FAA NAS status ------------------------------------------------------------------------
 
 def severity(kind: str) -> int:
-    """2 = ground stop, 1 = any other active program (delay program, closure NOTAM)."""
+    """Map an FAA event category to severity: 2 = ground stop (flights held at origin), 1 = any
+    other active program (ground delay program, closure NOTAM, general delay notice)."""
     return 2 if "ground stop" in kind.lower() else 1
 
 
 def parse_nas(text: str) -> tuple[str, list[dict]]:
+    """Parse the FAA NAS status XML into (update_time, events); one event per airport per
+    Delay_type block, with reason, average/max delay and start/end where the feed gives them."""
     root = ET.fromstring(text)
     update = (root.findtext("Update_Time") or "").strip()
     events = []
@@ -144,6 +175,8 @@ def parse_nas(text: str) -> tuple[str, list[dict]]:
 
 
 def fetch_nas(codes: list[str]) -> dict:
+    """Tool `get_live_status`: fetch the whole FAA NAS feed (it is not filterable) and return, per
+    requested code, the highest severity among its active events plus the events themselves."""
     codes = sorted({c.strip().upper() for c in codes if c.strip()})
     try:
         r = httpx.get(NAS_URL, timeout=TIMEOUT)

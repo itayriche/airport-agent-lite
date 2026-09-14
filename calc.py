@@ -2,6 +2,28 @@
 
 score = 100 * sum(|w_k| * norm_k) where norm_k is the airport's min-max position for KPI k across
 the candidates (a negative weight flips it: lower is better). Weights are normalised to sum to 1.
+
+Concepts used in this file
+--------------------------
+Objectives (what the analyst is asking):
+  expansion     Where would added terminal or flight capacity actually be used? Looks for
+                airports that are growing, running full planes, already adding seats, large,
+                and strained today.
+  congestion    How stressed is the airport right now? Full planes plus live FAA delays plus size.
+  unmet_demand  Is demand outrunning supply? Full planes, delays and passenger growth while the
+                airlines are NOT adding seats (negative weight on seat_growth).
+
+KPIs (all from public data, see tools.py):
+  pax_growth    Compound annual growth rate (CAGR: the steady yearly % that takes the 2019 value
+                to the latest full-year value) of passengers. Positive = airport is growing.
+  load_factor   Passengers / seats flown, trailing 12 months. 0.82 means planes leave 82% full;
+                airlines regard the low 80s as close to practical capacity.
+  seat_growth   Seats flown in the last 12 months vs the 12 months before. Shows whether airlines
+                are already adding capacity there.
+  scale         Passengers in the trailing 12 months. Size of the market.
+  intl_share    International departures / all departures. Proxy for long-haul exposure.
+  delay         Live FAA status right now: 0 nothing, 1 a delay program or notice, 2 a ground
+                stop (departures to that airport are held on the ground). A snapshot, not a rate.
 """
 
 KPIS = ("pax_growth", "load_factor", "seat_growth", "scale", "intl_share", "delay")
@@ -18,6 +40,7 @@ PRESETS = {
 
 
 def _normalise_weights(weights: dict) -> dict:
+    """Scale weights so their absolute values sum to 1 (signs kept), dropping zero weights."""
     total = sum(abs(w) for w in weights.values())
     if total == 0:
         raise ValueError("weights sum to zero")
@@ -25,7 +48,8 @@ def _normalise_weights(weights: dict) -> dict:
 
 
 def score_airports(kpis: dict, objective: str = "expansion", weights: dict | None = None) -> dict:
-    """`kpis` = {code: {kpi_name: value}}. Returns ranking with the arithmetic per airport."""
+    """Rank airports for an objective. `kpis` = {code: {kpi_name: value}}; returns the ranking
+    with the per-KPI arithmetic (value, normalised position, weight, points) for each airport."""
     if weights is None:
         if objective not in PRESETS:
             return {"error": f"unknown objective {objective!r}; use one of {sorted(PRESETS)}"}

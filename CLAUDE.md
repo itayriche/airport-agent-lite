@@ -39,10 +39,13 @@ served from disk, no restart needed.
 - `delay` is live FAA severity, not a historical rate. Closure NOTAMs are severity 1, not 2.
 - Plain-text replies; the page renders `textContent`, not markdown. gpt-oss-120b sometimes
   ignores this; Gemini obeys.
-- The system prompt fixes a six-section reply order (Answer, Airports considered, Ranking,
-  Reasoning, Assumptions and limits, Sources) because the brief asks for clear reasoning and
-  explicit assumptions and scoping. Keep the labels if you edit the prompt; DESIGN.md and README
-  describe them.
+- The system prompt fixes a seven-section reply order (Answer, Airports considered, Ranking,
+  Reasoning, Analyst view, Assumptions and limits, Sources) because the brief asks for clear
+  reasoning and explicit assumptions and scoping. "Analyst view" is the one place for the model's
+  own opinion, kept apart from the deterministic score. Keep the labels if you edit the prompt;
+  DESIGN.md and README describe them.
+- `intl_pax_share` and `freight_lbs` from get_airport_stats are context only, never in a preset:
+  they exist so the model can tell a cargo hub (ANC) from a long-haul passenger hub.
 - Tests cover pure functions only. Routes, APIs, and the LLM are checked by hand.
 
 ## Gotchas

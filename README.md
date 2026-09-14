@@ -36,8 +36,8 @@ bubble as-is, and the failed turn is not saved. Switch provider by editing `.env
 - What is the long-haul share at ANC?
 - Is there unmet demand at SFO, and why?
 
-Every reply uses the same order: Answer, Airports considered, Ranking, Reasoning, Assumptions and
-limits, Sources. Under it, a collapsed "tools" block shows each tool call, its arguments, and the
+Every reply uses the same order: Answer, Airports considered, Ranking, Reasoning, Analyst view
+(the model's own judgment, kept apart from the score), Assumptions and limits, Sources. Under it, a collapsed "tools" block shows each tool call, its arguments, and the
 raw result, so the numbers in the answer can be checked against the data.
 
 ## Layout
@@ -45,7 +45,7 @@ raw result, so the numbers in the answer can be checked against the data.
 | File | Role |
 |------|------|
 | `app.py` | FastAPI routes, the agent loop (up to 5 tool rounds), `history.json` read/write |
-| `tools.py` | Live fetchers: BTS T-100 (Socrata) aggregated into KPIs, FAA NAS status parsed into delay severity |
+| `tools.py` | Live fetchers: BTS T-100 (airline-reported monthly traffic per airport, via the Socrata open-data API) aggregated into KPIs; FAA NAS status (live delay programs and ground stops) parsed into delay severity |
 | `calc.py` | `score_airports`: min-max normalise, weight, rank. Presets for expansion, congestion, unmet demand |
 | `prompts.py` | System prompt and the three tool schemas |
 | `static/index.html` | The whole UI: chat, tool traces, session sidebar, starter questions, mic |
